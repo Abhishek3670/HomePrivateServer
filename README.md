@@ -1,166 +1,186 @@
-# Home Private Server
+# Nextcloud Home Server Setup Guide
 
-## **1️⃣ Install Ubuntu Server 24.04 LTS**
+A comprehensive guide for setting up Nextcloud on Ubuntu Server with external storage and troubleshooting steps.
 
-Download the latest Ubuntu Server version from: 🔗 [Ubuntu Server Download](https://ubuntu.com/download/server)
+## Prerequisites
 
----
+- Ubuntu Server 22.04 LTS or newer
+- Minimum 1GB RAM (2GB recommended)
+- At least 10GB storage space
+- Root/sudo access
+- External HDD/SSD (optional)
+- Domain name (optional, for remote access)
 
-## **2️⃣ Install a Lightweight Desktop Environment (Optional)**
+## Installation Steps
 
-If you want a GUI, install **XFCE**:
-
+### 1. System Preparation
 ```bash
-sudo apt update && sudo apt install xfce4 xfce4-goodies -y
-sudo reboot
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install required packages
+sudo apt install nginx php-fpm php-cli php-json php-curl php-imap php-gd php-mysql \
+php-zip php-xml php-mbstring php-intl php-imagick php-gmp php-bcmath php-opcache \
+mariadb-server redis-server php-redis unzip curl wget bzip2 fail2ban ufw certbot
 ```
 
----
-
-## **3️⃣ Set Up Remote Access (SSH)**
-
-To remotely access your server:
-
+### 2. Database Setup
 ```bash
-sudo apt install openssh-server -y  
-sudo systemctl enable ssh  
-sudo systemctl start ssh  
+# Secure MySQL installation
+sudo mysql_secure_installation
+
+# Create database and user
+sudo mysql -u root -p
+CREATE DATABASE nextcloud;
+CREATE USER 'nextcloud'@'localhost' IDENTIFIED BY 'your_password';
+GRANT ALL PRIVILEGES ON nextcloud.* TO 'nextcloud'@'localhost';
+FLUSH PRIVILEGES;
+EXIT;
 ```
 
-Find your server's IP:
-
+### 3. Download and Install Nextcloud
 ```bash
-ip a  
+# Download latest version
+cd /tmp
+wget https://download.nextcloud.com/server/releases/latest.zip
+unzip latest.zip
+sudo mv nextcloud /var/www/
+
+# Set permissions
+sudo chown -R www-data:www-data /var/www/nextcloud/
 ```
 
-Connect via SSH from another machine:
-
+### 4. Configure Nginx
 ```bash
-ssh username@server-ip  
+# Create Nginx config
+sudo nano /etc/nginx/sites-available/nextcloud
+
+# Enable site
+sudo ln -s /etc/nginx/sites-available/nextcloud /etc/nginx/sites-enabled/
+sudo rm /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl restart nginx
 ```
 
----
-
-## **4️⃣ Install Nextcloud (Personal Cloud Storage)**
-
+### 5. SSL Setup (Optional)
 ```bash
-sudo snap install nextcloud  
+# Install SSL certificate
+sudo certbot --nginx -d yourdomain.com
 ```
 
-Access Nextcloud in your browser:
-
-```text
-http://your-server-ip
-```
-
----
-
-## **5️⃣ Install a Media Server (Plex)**
-
+### 6. Security Enhancement
 ```bash
-sudo snap install plexmediaserver -y
-```
-
-Access Plex in your browser:
-
-```text
-http://your-server-ip:32400
-```
-
----
-
-## **6️⃣ Install qBittorrent (For Downloading)**
-
-```bash
-sudo apt install qbittorrent-nox -y  
-```
-
-Start the service:
-
-```bash
-qbittorrent-nox  
-```
-
-Access qBittorrent Web UI:
-
-```text
-http://your-server-ip:8080
-```
-
----
-
-## **7️⃣ Enable & Configure the Firewall (UFW)**
-
-Check firewall status:
-
-```bash
-sudo ufw status
-```
-
-If inactive, enable it:
-
-```bash
+# Configure firewall
+sudo ufw allow ssh
+sudo ufw allow http
+sudo ufw allow https
 sudo ufw enable
+
+# Setup fail2ban
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+sudo systemctl restart fail2ban
 ```
 
-Allow essential services:
+## External Storage Setup
+
+### 1. Prepare the Drive
+```bash
+# List available drives
+lsblk
+
+# Create partition
+sudo fdisk /dev/sdX
+
+# Format partition
+sudo mkfs.ext4 /dev/sdX1
+
+# Create mount point
+sudo mkdir /mnt/nextcloud-data
+```
+
+### 2. Configure Auto-mount
+```bash
+# Get drive UUID
+sudo blkid
+
+# Add to fstab
+sudo nano /etc/fstab
+# Add line:
+UUID=your-uuid /mnt/nextcloud-data ext4 defaults,nofail,noatime 0 2
+
+# Mount drive
+sudo mount -a
+```
+
+### 3. Set Permissions
+```bash
+sudo chown -R www-data:www-data /mnt/nextcloud-data
+sudo chmod -R 0770 /mnt/nextcloud-data
+```
+
+## Troubleshooting Steps
+
+### 1. Check System Status
+```bash
+# Check services
+systemctl status nginx
+systemctl status php*-fpm
+systemctl status mysql
+systemctl status redis
+
+# Check logs
+tail -f /var/log/nginx/error.log
+tail -f /var/www/nextcloud/data/nextcloud.log
+```
+
+### 2. Verify Permissions
+```bash
+# Check ownership
+ls -l /var/www/nextcloud
+ls -l /mnt/nextcloud-data
+
+# Fix permissions if needed
+sudo chown -R www-data:www-data /var/www/nextcloud
+sudo find /var/www/nextcloud/ -type d -exec chmod 750 {} \;
+sudo find /var/www/nextcloud/ -type f -exec chmod 640 {} \;
+```
+
+### 3. Database Checks
+```bash
+# Test database connection
+sudo -u www-data php /var/www/nextcloud/occ db:check
+```
+
+### 4. Performance Optimization
+```bash
+# Enable caching
+sudo -u www-data php /var/www/nextcloud/occ config:system:set memcache.local --value="\OC\Memcache\Redis"
+sudo -u www-data php /var/www/nextcloud/occ config:system:set memcache.distributed --value="\OC\Memcache\Redis"
+```
+
+## Maintenance Commands
 
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 32400  # Plex
-sudo ufw allow 80 443  # Web traffic (if using a web server)
-sudo ufw enable
+# Scan files
+sudo -u www-data php /var/www/nextcloud/occ files:scan --all
+
+# Clear cache
+sudo -u www-data php /var/www/nextcloud/occ cache:clear
+
+# Update Nextcloud
+sudo -u www-data php /var/www/nextcloud/occ upgrade
 ```
 
-Verify allowed rules:
+## Additional Resources
 
-```bash
-sudo ufw status numbered
-```
+- [Official Nextcloud Documentation](https://docs.nextcloud.com/)
+- [Nginx Configuration Generator](https://www.digitalocean.com/community/tools/nginx)
+- [Let's Encrypt Documentation](https://letsencrypt.org/docs/)
 
----
+## Notes
 
-## **8️⃣ Enable Automatic Security Updates**
-
-```bash
-sudo apt install unattended-upgrades -y
-sudo dpkg-reconfigure unattended-upgrades
-```
-
----
-
-## **9️⃣ Install Fail2Ban (Protect Against Brute Force Attacks)**
-
-```bash
-sudo apt install fail2ban -y
-```
-
-Enable & start the service:
-
-```bash
-sudo systemctl enable fail2ban
-sudo systemctl start fail2ban
-```
-
----
-
-## **🔟 Create a Non-Root User (Recommended)**
-
-```bash
-sudo adduser newuser
-sudo usermod -aG sudo newuser
-```
-
-Now, you can log in with `newuser` instead of `root` for better security.
-
----
-
-### ✅ **Your Home Server is Ready!**
-
-- **📁 Personal Cloud (Nextcloud)**
-- **🎥 Media Streaming (Plex)**
-- **⏬ Download Manager (qBittorrent)**
-- **🔐 Secured with Firewall & Fail2Ban**
-
-Let me know if you need further improvements! 🚀
-
+- Replace `yourdomain.com` with your actual domain
+- Replace `your_password` with secure passwords
+- Replace `/dev/sdX` with your actual drive path
+- Adjust PHP memory limits if needed in php.ini
+- Regular backups are highly recommended
